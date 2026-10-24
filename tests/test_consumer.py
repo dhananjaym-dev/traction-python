@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from tests.fakes import FakeChannel, FakeIncomingMessage, FakePublisher
 from traction._amqp import PublishException, TYPE_ID_FLIGHT
 from traction.clearance import ClearanceResult, ClearanceUnavailableError
-from traction.models import Disposition, Flight, RecordType
+from traction.models import Disposition, Flight
 from traction.spi import (
     AirportSpec,
     Evidence,
