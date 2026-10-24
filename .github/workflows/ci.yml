@@ -20,7 +20,7 @@ jobs:
           cache: pip
 
       - name: Install
-        run: pip install -e '.[demo]' pytest pytest-asyncio ruff
+        run: pip install -e '.[demo]' pytest pytest-asyncio ruff==0.15.15
 
       - name: Lint
         run: ruff check src tests demo
