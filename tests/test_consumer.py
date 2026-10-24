@@ -423,7 +423,7 @@ async def test_unknown_gate_costs_one():
 
 # ---------------------------------------------------------------- land, report, settle
 
-async def test_landed_flight_acks_with_terminal_record():
+async def test_landed_flight_acks_with_a_final_record():
     h = Harness()
     message = h.flight_message()
     await h.consumer.on_message(message)
@@ -434,7 +434,7 @@ async def test_landed_flight_acks_with_terminal_record():
     assert message.acks == 1
 
 
-async def test_flight_fault_rejects_terminal():
+async def test_flight_fault_rejects_as_final():
     def reporter(flight, error):
         return Incident(IncidentCategory.FLIGHT_FAULT, Evidence.from_exception(error))
 

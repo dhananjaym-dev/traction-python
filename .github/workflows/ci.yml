@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install
+        run: pip install -e '.[demo]' pytest pytest-asyncio ruff
+
+      - name: Lint
+        run: ruff check src tests demo
+
+      - name: Unit tests
+        run: pytest
+
+  scenario:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the interop stack
+        run: docker compose up -d --build --wait
+
+      - name: Run the cross-language scenario
+        run: |
+          set -o pipefail
+          ./demo/scenario-python.sh | tee scenario.log
+          tail -n1 scenario.log | grep -qx 'OK scenario-python'
+
+      - name: Dump compose logs
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
