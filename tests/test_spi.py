@@ -140,3 +140,16 @@ def test_incident_category_values():
     assert {c.value for c in IncidentCategory} == {
         "AIRPORT_FAULT", "GATE_FAULT", "FLIGHT_FAULT", "TRANSIENT", "RATE_LIMIT", "INTERNAL",
     }
+
+
+def test_spec_rejects_a_synchronous_pilot():
+    # A `def land` instead of `async def land` would run the side effect, then fail on the
+    # await, hold, and repeat the side effect every round. Reject it at registration.
+    from traction.spi import AirportSpec
+
+    class SyncPilot:
+        def land(self, flight):
+            return None
+
+    with pytest.raises(ValueError):
+        AirportSpec(**spec_kwargs(pilot=SyncPilot())).validate()

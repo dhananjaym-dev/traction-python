@@ -70,8 +70,31 @@ class FlightConsumer:
         self._ground_delay = ground_delay
         self._charters = charters
         self._sleep = sleep
+        self._in_flight = 0
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+    async def drain(self, timeout_s: float) -> bool:
+        """Waits for the delivery in flight (if any) to settle; False on timeout. A graceful
+        stop cancels the consumer, then drains, then closes the channel — so a flight mid-land
+        finishes instead of being redelivered as a duplicate vendor call."""
+        try:
+            await asyncio.wait_for(self._idle.wait(), timeout_s)
+            return True
+        except TimeoutError:
+            return False
 
     async def on_message(self, message) -> None:
+        self._in_flight += 1
+        self._idle.clear()
+        try:
+            await self._on_message(message)
+        finally:
+            self._in_flight -= 1
+            if self._in_flight == 0:
+                self._idle.set()
+
+    async def _on_message(self, message) -> None:
         try:
             flight = Flight.model_validate_json(message.body)
         except Exception:

@@ -63,7 +63,8 @@ spec = AirportSpec(
 
 registry = AirportRegistry(connection=amqp, redis=store, owning_process="py-tenant")
 await registry.register_all([spec])             # declare queues, announce, consume
-registry.start_events()                         # control-plane pause/resume broadcasts
+registry.start_events()                         # REQUIRED: without it, a paused airport
+                                                #   (ground stop, AIRPORT_FAULT) never resumes
 
 tower = Tower(registry, plain_channel)
 await tower.dispatch("crm:py", "contact-sync", Contact(id="c-1", email="c-1@example.com"))
@@ -77,8 +78,9 @@ every outcome to the tower queue, and pausing/resuming on the control plane's sa
 
 ## The wire contract
 
-The companion repo's `traction-core` is the source of truth; this library matches it byte for
-byte. The highlights:
+The companion repo's `traction-core` is the source of truth; this library emits JSON that is
+field-for-field identical to Jackson's (same names, explicit nulls — whitespace aside) and
+matches every queue argument, key shape and constant exactly. The highlights:
 
 | Surface | Shape |
 |---|---|

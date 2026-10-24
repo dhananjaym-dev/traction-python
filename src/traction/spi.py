@@ -4,6 +4,7 @@ buckets or status keys — it lands flights and classifies failures."""
 
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -151,6 +152,11 @@ class AirportSpec:
             raise ValueError(f"slots is required for airport {self.airport_id}")
         if self.pilot is None:
             raise ValueError(f"pilot is required for airport {self.airport_id}")
+        # A synchronous land would run the side effect, fail on the await, and repeat the side
+        # effect every holding round — reject the easy mistake here instead.
+        if not inspect.iscoroutinefunction(self.pilot.land):
+            raise ValueError(
+                f"pilot.land must be `async def` for airport {self.airport_id}")
         if self.reporter is None:
             raise ValueError(f"reporter is required for airport {self.airport_id}")
         for gate_id, cost in self.gates.items():

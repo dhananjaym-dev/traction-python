@@ -32,6 +32,9 @@ from traction.topology import TOWER_QUEUE, declare_airport, declare_tower, queue
 
 logger = logging.getLogger(__name__)
 
+# A graceful stop waits this long for the in-flight delivery to settle before closing channels.
+DRAIN_TIMEOUT_S = 5.0
+
 
 @dataclass
 class _Registered:
@@ -165,7 +168,9 @@ class AirportRegistry:
     def start_events(self) -> None:
         """Subscribes this process to tr:events. Separate from registration (like the Java
         auto-config, where the pub/sub container is its own bean): the application's runtime
-        calls it once, after the airports are registered."""
+        calls it once, after the airports are registered. Required for a working tenant: resume
+        only ever arrives as an event, so without this a paused airport stays paused until
+        restart."""
         if self._events_task is None:
             self._events_task = asyncio.create_task(self._events_loop(), name="tr-events")
 
@@ -208,6 +213,11 @@ class AirportRegistry:
             self._events_task = None
         for airport_id, registered in self._airports.items():
             await self.request_pause(airport_id)
+            # Let the delivery that is mid-flight settle before its channel closes (the Java
+            # container's stop waits the same way); past the timeout the broker redelivers.
+            if not await registered.consumer.drain(DRAIN_TIMEOUT_S):
+                logger.warning("airport %s: in-flight delivery did not settle within %.0fs; "
+                               "the broker will redeliver it", airport_id, DRAIN_TIMEOUT_S)
             for channel in (registered.channel, registered.plain_channel):
                 try:
                     await channel.close()

@@ -159,3 +159,50 @@ async def test_stop_cancels_consumers_and_closes_channels():
     runway = connection.channels[0].queues["tr.crm:py.runway"]
     assert runway.consumers == {}
     assert all(ch.closed for ch in connection.channels)
+
+
+async def test_stop_waits_for_the_in_flight_flight():
+    # A graceful stop must let the delivery that is mid-land finish (and settle) before the
+    # channels close, or every deploy under load costs a duplicate vendor call.
+    import asyncio
+
+    from tests.fakes import FakeIncomingMessage
+
+    connection = FakeConnection()
+    redis = FakeRedis()
+    redis.evalsha_results = [[1, 0]]  # clearance granted
+    gate = asyncio.Event()
+    landed = []
+
+    class SlowPilot:
+        async def land(self, flight):
+            await gate.wait()
+            landed.append(flight)
+
+    registry = make_registry(connection, redis)
+    await registry.register_all([make_spec(pilot=SlowPilot())])
+    runway = connection.channels[0].queues["tr.crm:py.runway"]
+    callback = next(iter(runway.consumers.values()))
+
+    message = FakeIncomingMessage({
+        "flightId": "1f0e8a9c-9b1d-4b7e-8a30-2f6f3f3b9b21",
+        "airportId": "crm:py", "gateId": "contact-sync", "domainRef": "c-1",
+        "charterRef": None, "attemptCount": 0, "holdCount": 0,
+        "correlationId": "a1b2c3", "payloadType": "demo.Contact",
+        "payload": {"id": "c-1"},
+    })
+    delivery = asyncio.create_task(callback(message))
+    for _ in range(20):  # let it reach the pilot
+        await asyncio.sleep(0)
+
+    stop_task = asyncio.create_task(registry.stop())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not stop_task.done()
+    assert not any(ch.closed for ch in connection.channels)  # still draining
+
+    gate.set()
+    await asyncio.wait_for(stop_task, timeout=2)
+    await delivery
+    assert landed and message.acks == 1
+    assert all(ch.closed for ch in connection.channels)

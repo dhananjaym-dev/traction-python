@@ -82,3 +82,27 @@ def test_public_api_reexports():
         "AirportRegistry", "AirportStatus",
     ):
         assert hasattr(traction, name), name
+
+
+async def test_dispatch_serializes_aliased_payload_models_round_trippable():
+    # A tenant model with wire aliases (normal for camelCase vendor APIs) must dispatch by
+    # alias, or the consumer's re-validation rejects every flight as payload-unreadable.
+    from pydantic import Field
+
+    class Lead(BaseModel):
+        first_name: str = Field(alias="firstName")
+
+    from traction.registry import AirportRegistry
+    from traction.tower import Tower
+
+    registry = AirportRegistry(
+        connection=FakeConnection(), redis=FakeRedis(), owning_process="py-tenant"
+    )
+    await registry.register_all([make_spec(payload_types={"demo.Lead": Lead})])
+    channel = FakeChannel()
+    tower = Tower(registry, channel)
+    await tower.dispatch("crm:py", "contact-sync", Lead(firstName="Ada"))
+    body = channel.default_exchange.published[0].json
+    assert body["payload"] == {"firstName": "Ada"}
+    # and the consumer's resolution step accepts exactly what dispatch wrote
+    assert Lead.model_validate(body["payload"]).first_name == "Ada"

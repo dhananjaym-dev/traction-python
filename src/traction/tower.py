@@ -55,7 +55,9 @@ class Tower:
             holdCount=0,
             correlationId=str(uuid4())[:CORRELATION_ID_LENGTH],
             payloadType=payload_type,
-            payload=payload.model_dump(mode="json"),
+            # By alias: the consumer re-validates with the same model, which reads aliases, so a
+            # field-name dump would reject every flight of an alias-carrying payload model.
+            payload=payload.model_dump(mode="json", by_alias=True),
         )
         await self._channel.default_exchange.publish(
             json_message(flight.to_wire(), TYPE_ID_FLIGHT),
