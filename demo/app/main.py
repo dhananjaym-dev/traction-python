@@ -4,6 +4,7 @@ stops, replay — is the framework's and the Java control plane's business."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -25,10 +26,28 @@ ACME_BASE_URL = os.environ.get("ACME_BASE_URL", "http://acme-vendor:9090")
 
 _sequence = count(1)
 
+logger = logging.getLogger(__name__)
+
+
+async def connect_with_retry(url: str, *, connect=aio_pika.connect_robust,
+                             attempts: int = 30, delay_s: float = 2.0):
+    """The broker's healthcheck can pass before its listener accepts connections, and
+    connect_robust raises on a failed FIRST connect — so the tenant waits for the broker
+    instead of dying at startup."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return await connect(url)
+        except Exception:
+            if attempt == attempts:
+                raise
+            logger.info("broker not ready (attempt %d/%d); retrying in %.0fs",
+                        attempt, attempts, delay_s)
+            await asyncio.sleep(delay_s)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    connection = await aio_pika.connect_robust(AMQP_URL)
+    connection = await connect_with_retry(AMQP_URL)
     store = redis_asyncio.from_url(REDIS_URL, decode_responses=True)
     acme = AcmeClient(ACME_BASE_URL)
     registry = AirportRegistry(connection=connection, redis=store, owning_process="py-tenant")

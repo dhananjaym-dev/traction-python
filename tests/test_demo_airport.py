@@ -83,3 +83,33 @@ async def test_crm_py_spec_routes_gates_to_vendor_paths():
         ("/contacts", {"id": "c1", "email": "c1@example.com", "bad": False}),
         ("/companies", {"id": "k1", "domain": "k1.example.com", "bad": False}),
     ]
+
+
+async def test_connect_with_retry_survives_a_slow_broker():
+    # The broker's healthcheck can pass before its listener accepts connections (seen in CI):
+    # the tenant must retry the first connect instead of dying at startup.
+    from demo.app.main import connect_with_retry
+
+    attempts = []
+
+    async def flaky_connect(url):
+        attempts.append(url)
+        if len(attempts) < 3:
+            raise ConnectionError("refused")
+        return "connection"
+
+    result = await connect_with_retry("amqp://x", connect=flaky_connect, attempts=5, delay_s=0)
+    assert result == "connection"
+    assert len(attempts) == 3
+
+
+async def test_connect_with_retry_gives_up_eventually():
+    import pytest as _pytest
+
+    from demo.app.main import connect_with_retry
+
+    async def refused(url):
+        raise ConnectionError("refused")
+
+    with _pytest.raises(ConnectionError):
+        await connect_with_retry("amqp://x", connect=refused, attempts=3, delay_s=0)
