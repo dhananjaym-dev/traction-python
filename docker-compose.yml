@@ -1,0 +1,89 @@
+# Everything runs inside this compose network. AMQP (5672) and Redis (6379) are internal only
+# and never published, so the demo can neither reach nor collide with a broker or store on the
+# host. Published on loopback only (127.0.0.1, never the LAN): the Java control plane :8080
+# (dashboard http://localhost:8080/traction), acme-vendor :9090, this repo's tenant :8000, and
+# the RabbitMQ management UI at http://localhost:15674 (guest/guest; RABBIT_MGMT_PORT overrides).
+#
+# The control plane and the vendor build straight from the companion Java repo's GitHub URL,
+# pinned to a commit: this repo vendors no Java, and the only things the two processes share are
+# the broker and the store — which is the claim the demo proves.
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    ports:
+      - "127.0.0.1:${RABBIT_MGMT_PORT:-15674}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  redis:
+    image: valkey/valkey:8
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  acme-vendor:
+    build:
+      context: https://github.com/dhananjaym-dev/traction.git#55ead1c938ea186c11d4a9aa17c546ea1e51ecdb
+      dockerfile: acme-vendor/Dockerfile
+    ports:
+      - "127.0.0.1:9090:9090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9090/mode"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  control-plane:
+    build:
+      context: https://github.com/dhananjaym-dev/traction.git#55ead1c938ea186c11d4a9aa17c546ea1e51ecdb
+      dockerfile: demo-app/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"   # dashboard at http://localhost:8080/traction
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_DATA_REDIS_HOST: redis
+      ACME_BASE_URL: http://acme-vendor:9090
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      acme-vendor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/traction/api/airports"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 15s
+
+  py-tenant:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      ACME_BASE_URL: http://acme-vendor:9090
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      acme-vendor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
