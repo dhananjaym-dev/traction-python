@@ -5,7 +5,7 @@ from importlib import resources
 
 import pytest
 
-from tests.fakes import FakeRedis, FakeRedisError
+from tests.fakes import FakeRedis
 
 # The script is the cross-language contract: byte-identical to the Java repo's
 # traction-core/src/main/resources/traction/clearance.lua.
